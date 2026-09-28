@@ -1,127 +1,85 @@
 # Indoor Plant Corner
 
-A full-screen Three.js scene of an indoor room corner — window, floor, walls, and an animated potted plant — built for a Computer Graphics university project.
+A full-screen Three.js scene of an indoor room corner: wood floor, plaster walls, a framed window looking out on an animated outdoor scene, a pendant lamp, and a potted sunflower that sways in the breeze. Day/night lighting is keyboard-controlled and the leaf color is mouse-controlled.
 
-## 1. Overview
-
-The scene fills the entire browser viewport: a wood floor, two walls, a large framed window looking out on a simple outdoor scene, and a potted plant (pot + stem + 8 leaves) that gently sways. Day/night lighting is keyboard-controlled and the plant's color is mouse-controlled.
-
-## 2. How to run
+## 1. How to run
 
 ```
 npm install
 npm run dev
 ```
 
-Open the printed local URL (e.g. `http://localhost:5173`) **in the browser** — do not double-click `index.html` directly, and do not open `dist/index.html` from a file browser. Both skip the dev server, so the browser can't resolve the `import ... from 'three'` module (or the build's `/assets/...` paths) and the page is left blank except for the static UI panel. Always go through `npm run dev` (or `npm run build && npm run preview` for a production check).
+Open the printed local URL (e.g. `http://localhost:5173`) in the browser. Do not double-click `index.html` or open `dist/index.html` from a file browser: the browser can't resolve the bundler-managed `import ... from 'three'` or the build's asset paths, and the page stays blank. For a production check use `npm run build && npm run preview`.
 
-## 3. Technologies used
+If startup fails, an on-page error banner (`#fatalError`) shows the message instead of a silent blank page.
 
-Three.js (r160), Vite (dev server / bundler), plain JavaScript ES modules, GLSL (custom shader), HTML5 Canvas (procedural textures — no image files, nothing that can fail to load).
+## 2. Technologies
 
-## 4. Requirement mapping
+Three.js, Vite (dev server / bundler), plain JavaScript ES modules, GLSL (custom shaders), HTML5 Canvas (procedural textures).
+
+## 3. Requirement mapping
 
 | Requirement | Implementation |
 |---|---|
-| Custom shader | `src/shaders.js` — `ShaderMaterial` applied to every leaf in `src/main.js` |
-| Lighting | `AmbientLight` + `DirectionalLight`, `src/main.js` |
-| Perspective projection | `THREE.PerspectiveCamera`, `src/main.js` |
-| Texture per object | `src/textures.js` — floor, wall, pot, leaf, window textures, all canvas-generated |
-| Animation | leaf sine-sway + shader time uniform, `animate()` in `src/main.js` |
-| Keyboard interaction | `D` / `N` / `Space` in `src/main.js` |
-| Mouse interaction | `Raycaster` click handler in `src/main.js` |
-| Shadows | `renderer.shadowMap`, pot/stem cast, floor/walls receive |
-| Full-screen canvas | `index.html` CSS (`html, body, canvas { width/height: 100% }`) + `renderer.setSize` |
+| Custom shaders | `src/shaders.js` (GLSL). **Window glass** is a full hand-written `ShaderMaterial` (vertex + fragment: fresnel reflection, sweeping sheen, smudge texture), created in `src/roomWindow.js`. **Sunflower leaves** keep `MeshStandardMaterial` (so lighting and shadows still work) and get GLSL injected via `onBeforeCompile` in `src/sunflower.js`: vertex wind flutter that grows toward the leaf tip, plus fragment mottling and a translucent fresnel rim that fades at night. |
+| Lighting | `src/lighting.js`: `HemisphereLight` fill, shadow-casting `DirectionalLight` (sun by day, moon by night, aimed through the window), `PointLight` skylight at the window, warm `PointLight` pendant lamp; soft shadows. `src/dayNight.js` blends everything smoothly between day and night. |
+| Perspective projection | `THREE.PerspectiveCamera` in `src/camera.js`, placed inside the room at eye height; `updateProjectionMatrix()` is called on resize. |
+| Texture for each object | Floor, walls and ceiling use photographed PBR sets (diffuse + normal + roughness). Every other object has its own texture: terracotta pot, soil, window frame and trim, lamp, concrete foundation, grass, glass smudges, window scenery (sky, clouds, hills, trees, stars, moon), stem, leaf veins, petals, seeds and sepals. |
+| Animation | Delta-time loop in `src/main.js`: stem/leaf/flower-head sway, GLSL leaf flutter, drifting clouds and stars, sweeping glass sheen, eased day/night and lamp transitions. |
+| Mouse interaction | OrbitControls (clamped so the camera stays inside the room). Clicking the pot, soil or plant raycasts the hit and cycles the leaf color green → purple → red; drags are ignored. |
+| Keyboard interaction | See the table below. |
 
-## 5. Custom shader
+### Keyboard controls
 
-`src/shaders.js` defines the leaf `ShaderMaterial` (one instance per leaf, so each leaf can hold its own color):
-- **Vertex shader**: the standard transform every vertex shader does — `gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0)` — plus passing UV coordinates to the fragment shader.
-- **Fragment shader**: samples the leaf texture, multiplies it by a `plantColor` uniform (this is what the mouse click changes), and adds a small `sin(time * 2.0 + vUv.y * 5.0) * 0.05` brightness wave so the shader is visibly animated, not static.
+| Key | Action |
+|---|---|
+| `N` / `Space` | Toggle day / night |
+| `L` | Toggle the pendant lamp (it also follows day/night by default) |
+| `C` | Cycle leaf color (same as clicking the plant) |
+| `R` | Reset the camera |
+| `W A S D` / arrow keys | Walk around the room |
+| `Q` / `E` | Lower / raise the view |
 
-Applied in `src/main.js` inside the leaf-creation loop — each leaf gets `uniforms: { map, plantColor, time }`.
+## 4. Texture credits
 
-## 6. Lighting
+The floor, wall and ceiling maps in `src/assets/textures/` are CC0 (public domain) photographed materials from Poly Haven:
 
-- `AmbientLight` — soft fill light so nothing is pure black.
-- `DirectionalLight` — acts as sun/moon; Three.js points it from its `position` toward the origin, so moving the position changes the light **direction**, not just its color.
-- Day: bright white ambient, warm strong light from `(6, 8, 4)` (window/right side).
-- Night: dim blue ambient, weak cool light from `(-5, 3, -4)` (opposite side — moonlight). The shadow direction visibly flips between modes.
+- Walls / ceiling: https://polyhaven.com/a/white_stucco
+- Floor: https://polyhaven.com/a/wooden_floor_02
 
-## 7. Perspective projection
+All other textures are drawn procedurally with the Canvas 2D API at runtime (`src/textures.js`, `src/sunflower.js`). All models are built from Three.js geometries, and the code is original work.
 
-`new THREE.PerspectiveCamera(45, aspect, 0.1, 100)` — objects farther from the camera appear smaller, matching human vision. Camera sits at `(6, 4, 8)` looking toward `(0.5, 1.8, 0)`, a 3/4 angle that keeps the window and the plant both in frame.
+## 5. How to demonstrate every requirement
 
-## 8. Textures
+1. Run `npm run dev` and open the URL. The room fills the whole window.
+2. Point out the window, lamp and sunflower (pot, stem, leaves, flower head), all textured.
+3. Press `N`. The lighting fades to night, the sun/moon direction changes, shadows move, the window scenery turns to stars and moon, and the lamp switches on.
+4. Press `N` or `Space` again to fade back to day. Press `L` to toggle the lamp on its own.
+5. Click the leaves or pot (or press `C`). The leaf color cycles green → purple → red and the panel label updates.
+6. Watch the leaves and flower head sway, and the glass sheen and clouds drift.
+7. Drag with the mouse to orbit, scroll to zoom, and use `W A S D` / `Q` / `E` to walk. Press `R` to reset.
+8. Open `src/shaders.js` to show the GLSL for the glass and the leaves.
+9. Resize the window. The scene keeps filling the viewport.
 
-All generated at runtime on an HTML `<canvas>` (`src/textures.js`), applied as `.map` on each material — no external image files, so nothing can fail to load during a demo:
-- Floor: striped wood planks
-- Walls: subtle off-white noise
-- Pot: terracotta with horizontal ridge lines
-- Leaves: green ellipse with a center vein (alpha-transparent background)
-- Window glass: sky + hill + sun outdoor scene
+## 6. Likely viva questions
 
-## 9. Animation
+**Which camera did you use, and why?**
+`PerspectiveCamera(60°, aspect, 0.1, 60)`. It gives realistic depth (distant objects look smaller), unlike an orthographic camera.
 
-Each leaf sits on a pivot `Group`. Every frame:
-```js
-pivot.rotation.z = baseRotZ + Math.sin(t * 0.6 + offset) * 0.08;
-pivot.userData.material.uniforms.time.value = t;
-```
-A slow, small-amplitude sine sway (per-leaf phase offset so they don't move in sync) plus the shader's own animated wave term.
+**Where are the custom shaders and what do they do?**
+`src/shaders.js`. The window glass is a complete `ShaderMaterial`: the vertex shader computes world-space normal and view direction, and the fragment shader mixes a tint with a sky reflection by fresnel, adds a moving diagonal sheen and a smudge texture. The leaves use `onBeforeCompile` to inject a vertex wind-flutter displacement and a fragment mottling/rim-light effect into the standard material, so they still receive Three.js lights and shadows.
 
-## 10. Keyboard interaction
+**How does clicking change the plant color?**
+A `Raycaster` (`src/clickToColor.js`) checks whether the click hit the pot, soil or plant. If so, it advances an index through the `leafColors` array (green, purple, red) and applies the color to the leaf materials. Drags are ignored so orbiting doesn't trigger it.
 
-`window.addEventListener('keydown', ...)` in `src/main.js`:
-- `D` → day mode, `N` → night mode, `Space` → toggle. The current mode is shown live in the on-screen panel.
+**How does day/night lighting work?**
+`setMode()` only chooses the target. Each frame `update(dt)` eases a `nightMix` value toward 0 or 1, and `applyEnvironment()` lerps the hemisphere light, sun/moon intensity, color and position, skylight, background, glass uniforms, lamp and leaf rim light. The result is a smooth transition.
 
-## 11. Mouse interaction
+**How does the animation work?**
+Each frame uses a clamped delta time. The plant's stem, leaves and head follow sine functions with per-leaf phase offsets, the leaf vertex shader gets `uTime` for flutter, the glass shader gets `uTime` for the sheen, and the window scenery is redrawn about 16 times per second.
 
-A `click` listener converts the cursor position to normalized device coordinates and casts a `THREE.Raycaster` against the pot, stem, and all leaf meshes. On a hit, `colorIndex` cycles green → purple → red → green, and every leaf's `plantColor` shader uniform is updated directly — the 3D object itself changes, not just UI text (the panel's color label is just a readout of the same state).
+**Why are most textures generated instead of image files?**
+They are drawn with Canvas 2D into `CanvasTexture`s, which keeps the project self-contained and original. Only the floor, wall and ceiling use photographed CC0 texture sets, credited above, because realistic plaster and wood are hard to fake procedurally.
 
-## 12. Day/Night implementation
-
-`setMode(isNight)` in `src/main.js` is the single place that updates: ambient light intensity/color, directional light intensity/color/**position**, scene background, window glass tint/opacity, and the UI mode badge.
-
-## 13. What was wrong before / what changed
-
-The previous version rendered correctly under a running Vite dev server but the page you saw was blank because the app wasn't being served by Vite (opened as a raw file, or the built `dist/index.html` opened directly) — neither can resolve the bundler-managed `three` import or root-absolute build asset paths. Fixes and upgrades made:
-- `index.html`: hardened full-viewport CSS (`html, body, canvas` at 100% width/height), added an on-page error banner (`#fatalError`) so any future failure shows a visible message instead of a silent blank page.
-- `src/main.js`: wrapped scene setup in `try/catch` reporting to that banner; enlarged the room and repositioned the camera for a bigger, clearer composition; added a plant stem; raised leaf count to 8; enabled shadow mapping (`renderer.shadowMap`, `dirLight.castShadow`, floor/wall `receiveShadow`, pot/stem `castShadow`); moved the custom shader onto the leaves (tied to the click-to-change-color interaction via the `plantColor` uniform) instead of the window glass.
-- `src/shaders.js`: replaced the glass tint shader with the leaf shader (texture × color + animated wave).
-- `src/textures.js`: window texture upgraded to a small outdoor scene (sky/hill/sun) instead of a flat gradient.
-
-## 14. How to demonstrate every requirement
-
-1. Load the app via `npm run dev` and open the printed URL — the room fills the whole browser window immediately.
-2. Point out the window (top right) and the plant (pot, stem, leaves) — both clearly visible, both textured.
-3. Press `N` — lighting dims, the shadow direction flips, the window darkens (light direction + intensity change).
-4. Press `D` — back to bright daylight.
-5. Press `Space` — toggles between the two.
-6. Click directly on the leaves or pot — the plant cycles green → purple → red, and the panel's color label updates to match.
-7. Point out the leaves gently swaying — that's the sine-wave animation running every frame.
-8. Open `src/shaders.js` and show the vertex/fragment GLSL — that's the custom shader, applied to the leaves, and its `plantColor` uniform is exactly what the mouse click updates.
-9. Resize the browser window — the scene keeps filling the viewport (camera aspect + renderer size both update on `resize`).
-
-## 15. Likely viva questions
-
-**Q: Which camera did you use, and why?**
-A: `PerspectiveCamera` — it gives realistic depth, where farther objects appear smaller, unlike an orthographic camera.
-
-**Q: Where is the custom shader, and what does it do?**
-A: `src/shaders.js`, applied to the leaves. The vertex shader does the standard position transform; the fragment shader multiplies the leaf texture by a `plantColor` uniform and adds a small animated sine wave for a subtle "alive" shimmer.
-
-**Q: How does clicking change the plant's color?**
-A: A `Raycaster` detects which mesh the click hit. If it's the pot, stem, or a leaf, I cycle to the next color in `[green, purple, red]` and write it directly into each leaf's `plantColor` shader uniform.
-
-**Q: How does day/night lighting work?**
-A: One function, `setMode()`, changes the ambient light's intensity/color, the directional light's intensity/color/**position** (which changes its direction, since Three.js directional lights always point at the origin from their position), the background color, and the window tint.
-
-**Q: How does the leaf animation work?**
-A: Each leaf is parented to a small pivot group; every frame I set `pivot.rotation.z` to a base angle plus `sin(time * speed + offset) * 0.08`, so it sways slowly and each leaf is slightly out of phase with the others.
-
-**Q: Why are the textures generated instead of image files?**
-A: They're drawn with the HTML5 Canvas 2D API into a `CanvasTexture`, so there are zero external asset files that could go missing or fail to load during the demo.
-
-**Q: Why do shadows look the way they do?**
-A: `renderer.shadowMap` is enabled and the directional light casts shadows; the floor and walls receive them. Moving the light between day/night positions visibly changes the shadow's direction and softness.
+**Why do shadows look the way they do?**
+The renderer's shadow map is enabled and the directional light casts shadows onto surfaces that receive them. Moving the light between its day and night positions changes the shadow direction.
