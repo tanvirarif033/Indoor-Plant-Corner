@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { createLeafTexture } from './textures.js';
+import { createLeafTexture, createPetalTexture, createSeedTexture } from './textures.js';
+import {
+  leafVertexParsChunk,
+  leafVertexTransformChunk,
+  leafFragmentParsChunk,
+  leafFragmentColorChunk
+} from './shaders.js';
 
 // Procedural sunflower: curved stem, veined leaves, sepals, layered petals and an
 // instanced phyllotaxis seed disk. Coordinates are local to the plant group (pot origin
@@ -157,7 +163,26 @@ function createSunflowerLeafGeometry(length, halfWidth, droop, asymmetry, random
   });
 }
 
-function createSunflowerLeaf(length, halfWidth, droop, random, leafTexture) {
+// injects the custom GLSL (wind flutter + mottling + translucent rim) into a standard material
+function applyLeafShader(material, phase, sharedUniforms) {
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = sharedUniforms.uTime;
+    shader.uniforms.uWind = sharedUniforms.uWind;
+    shader.uniforms.uDay = sharedUniforms.uDay;
+    shader.uniforms.uPhase = { value: phase };
+    shader.uniforms.uRimColor = { value: new THREE.Color(0x9bd05a) };
+
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\n' + leafVertexParsChunk)
+      .replace('#include <begin_vertex>', '#include <begin_vertex>\n' + leafVertexTransformChunk);
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\n' + leafFragmentParsChunk)
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>\n' + leafFragmentColorChunk);
+  };
+  material.customProgramCacheKey = () => 'sunflower-leaf-shader';
+}
+
+function createSunflowerLeaf(length, halfWidth, droop, random, leafTexture, sharedUniforms) {
   const geometry = createSunflowerLeafGeometry(length, halfWidth, droop, (random() - 0.5) * 0.2, random);
   // length along -Z, upper surface facing +Y
   geometry.rotateX(-Math.PI / 2);
@@ -171,6 +196,9 @@ function createSunflowerLeaf(length, halfWidth, droop, random, leafTexture) {
   };
   const upperMaterial = new THREE.MeshStandardMaterial({ ...commonSettings, side: THREE.FrontSide });
   const underMaterial = new THREE.MeshStandardMaterial({ ...commonSettings, side: THREE.BackSide });
+  const shaderPhase = random() * Math.PI * 2;
+  applyLeafShader(upperMaterial, shaderPhase, sharedUniforms);
+  applyLeafShader(underMaterial, shaderPhase, sharedUniforms);
 
   const upper = new THREE.Mesh(geometry, upperMaterial);
   const under = new THREE.Mesh(geometry, underMaterial);
@@ -196,7 +224,7 @@ function tintSunflowerLeaf(leaf, color) {
   underMaterial.color.copy(color).multiplyScalar(shade * 0.6);
 }
 
-function createSunflowerLeaves(curve, random, initialTint) {
+function createSunflowerLeaves(curve, random, initialTint, sharedUniforms) {
   const leafTexture = createLeafTexture();
   const attachments = [0.2, 0.3, 0.42, 0.54, 0.66, 0.78];
   const leaves = [];
@@ -208,7 +236,8 @@ function createSunflowerLeaves(curve, random, initialTint) {
       0.4 * sizeFactor,
       lerp(0.32, 0.16, i / (attachments.length - 1)) + random() * 0.06,
       random,
-      leafTexture
+      leafTexture,
+      sharedUniforms
     );
     tintSunflowerLeaf(leaf, initialTint);
 
@@ -317,8 +346,12 @@ function createSunflowerPetals(random) {
   ];
 
   const geometry = mergeGeometries(layers.map((layer) => createPetalLayer(random, layer)));
+  const petalTexture = createPetalTexture();
   const material = new THREE.MeshStandardMaterial({
     vertexColors: true,
+    map: petalTexture,
+    bumpMap: petalTexture,
+    bumpScale: 0.4,
     roughness: 0.55,
     metalness: 0,
     side: THREE.DoubleSide
@@ -337,7 +370,7 @@ const DISK_HEIGHT = 0.08;
 function createSunflowerSeeds(random) {
   const count = 480;
   const seedGeometry = new THREE.SphereGeometry(1, 6, 4);
-  const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, metalness: 0 });
+  const material = new THREE.MeshStandardMaterial({ color: 0xffffff, map: createSeedTexture(), roughness: 0.85, metalness: 0 });
   const seeds = new THREE.InstancedMesh(seedGeometry, material, count);
   seeds.castShadow = true;
   seeds.receiveShadow = true;
@@ -388,7 +421,7 @@ function createSunflowerDiskBase() {
   const geometry = new THREE.SphereGeometry(1, 28, 14);
   const disk = new THREE.Mesh(
     geometry,
-    new THREE.MeshStandardMaterial({ color: 0x2a190c, roughness: 0.95 })
+    new THREE.MeshStandardMaterial({ color: 0x4a3222, map: createSeedTexture(), roughness: 0.95 })
   );
   disk.scale.set(DISK_RADIUS, DISK_RADIUS, DISK_HEIGHT * 1.1);
   disk.position.z = -0.005;
@@ -399,9 +432,10 @@ function createSunflowerDiskBase() {
 
 // ---------------------------------------------------------------- sepals
 
-function createSunflowerSepals(random) {
+function createSunflowerSepals(random, sepalTexture) {
   const material = new THREE.MeshStandardMaterial({
-    color: 0x4e7a2e,
+    color: 0x5a8a34,
+    map: sepalTexture,
     roughness: 0.75,
     side: THREE.DoubleSide
   });
@@ -459,12 +493,12 @@ function createSunflowerSepals(random) {
 
 // ---------------------------------------------------------------- head
 
-function createSunflowerHead(random) {
+function createSunflowerHead(random, sepalTexture) {
   const head = new THREE.Group();
   const petals = createSunflowerPetals(random);
   const diskBase = createSunflowerDiskBase();
   const seeds = createSunflowerSeeds(random);
-  const sepals = createSunflowerSepals(random);
+  const sepals = createSunflowerSepals(random, sepalTexture);
   head.add(sepals, petals, diskBase, seeds);
   head.userData.meshes = [petals, diskBase, seeds];
   return head;
@@ -478,21 +512,26 @@ export function createSunflower({ leafTint = new THREE.Color(0x3e9f4f) } = {}) {
 
   const stemCurve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(0.0, 0.8, 0.0),
-    new THREE.Vector3(0.02, 1.3, 0.02),
-    new THREE.Vector3(-0.03, 1.9, 0.06),
-    new THREE.Vector3(0.02, 2.5, 0.05),
-    new THREE.Vector3(0.08, 2.95, 0.1),
-    new THREE.Vector3(0.07, 3.2, 0.24)
+    new THREE.Vector3(0.02, 1.3, -0.02),
+    new THREE.Vector3(-0.03, 1.9, -0.06),
+    new THREE.Vector3(0.02, 2.5, -0.05),
+    new THREE.Vector3(0.08, 2.95, -0.1),
+    new THREE.Vector3(0.07, 3.2, -0.24)
   ]);
   const stem = createSunflowerStem(stemCurve);
   root.add(stem);
 
-  const { leaves, leafTexture } = createSunflowerLeaves(stemCurve, random, leafTint);
+  const sharedUniforms = {
+    uTime: { value: 0 },
+    uWind: { value: 1 },
+    uDay: { value: 1 }
+  };
+  const { leaves, leafTexture } = createSunflowerLeaves(stemCurve, random, leafTint, sharedUniforms);
   leaves.forEach((pivot) => root.add(pivot));
 
-  // head faces toward the window / camera side (+Z) with an irregular tilt
-  const head = createSunflowerHead(random);
-  const headBaseRotation = new THREE.Euler(-0.22, 0.12, 0.09, 'YXZ');
+  // head faces into the room (-Z, toward the viewer) turned slightly toward -X, with an irregular tilt
+  const head = createSunflowerHead(random, leafTexture);
+  const headBaseRotation = new THREE.Euler(-0.22, Math.PI + 0.35, 0.09, 'YXZ');
   head.rotation.copy(headBaseRotation);
   const stemEnd = stemCurve.getPointAt(1);
   head.position.copy(stemEnd).add(new THREE.Vector3(0, 0, 0.1).applyEuler(head.rotation));
@@ -510,6 +549,7 @@ export function createSunflower({ leafTint = new THREE.Color(0x3e9f4f) } = {}) {
 
   // very small sinusoidal motion, nothing that reads as spinning
   function update(t) {
+    sharedUniforms.uTime.value = t;
     root.rotation.z = Math.sin(t * 0.6) * 0.012;
     root.rotation.x = Math.sin(t * 0.45 + 1.0) * 0.008;
 
@@ -521,6 +561,11 @@ export function createSunflower({ leafTint = new THREE.Color(0x3e9f4f) } = {}) {
 
     head.rotation.x = headBaseRotation.x + Math.sin(t * 0.7) * 0.008;
     head.rotation.y = headBaseRotation.y + Math.sin(t * 0.5 + 2.0) * 0.01;
+  }
+
+  // 0 (night) .. 1 (day): scales the translucent leaf rim so nothing glows in the dark
+  function setDaylight(amount) {
+    sharedUniforms.uDay.value = amount;
   }
 
   function dispose() {
@@ -537,5 +582,5 @@ export function createSunflower({ leafTint = new THREE.Color(0x3e9f4f) } = {}) {
     });
   }
 
-  return { group: root, clickTargets, setLeafTint, update, dispose };
+  return { group: root, clickTargets, setLeafTint, setDaylight, update, dispose };
 }

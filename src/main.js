@@ -4,11 +4,20 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
   createFloorTexture,
   createWallTexture,
+  createSoilTexture,
+  createGrassTexture,
+  createConcreteTexture,
+  createContactShadowTexture,
+  createEdgeShadowTexture,
+  createFrameTexture,
+  createGlassSurfaceTexture,
   createPotTexture,
+  createCeilingTexture,
   createGlassTexture
 } from './textures.js';
 
 import { createSunflower } from './sunflower.js';
+import { glassVertexShader, glassFragmentShader } from './shaders.js';
 
 
 try {
@@ -47,23 +56,34 @@ function init() {
 
   const camera =
     new THREE.PerspectiveCamera(
-      45,
+      60,
       window.innerWidth /
         window.innerHeight,
       0.1,
-      100
+      60
     );
 
-  camera.position.set(
-    6,
-    4,
-    8
+  // human-eye view from inside the room: floor below, ceiling above, window and plant ahead
+  const initialCameraPosition =
+    new THREE.Vector3(
+      -1.6,
+      2.3,
+      -3.8
+    );
+
+  const initialCameraTarget =
+    new THREE.Vector3(
+      0.8,
+      3.0,
+      2.2
+    );
+
+  camera.position.copy(
+    initialCameraPosition
   );
 
   camera.lookAt(
-    0.5,
-    1.8,
-    0
+    initialCameraTarget
   );
 
 
@@ -104,12 +124,19 @@ function init() {
 
   // ============================================================
   // LIGHTING
+  //
+  // - HemisphereLight: sky/ground bounce fill (soft ambient)
+  // - DirectionalLight: sun / moon, aimed THROUGH the window so
+  //   the walls and frame cast a real window-shaped light patch
+  // - PointLight (window): diffuse skylight spilling in
+  // - PointLight (lamp): warm pendant lamp, toggled with L
   // ============================================================
 
   const ambientLight =
-    new THREE.AmbientLight(
+    new THREE.HemisphereLight(
       0xffffff,
-      0.7
+      0xd0bfa6,
+      0.9
     );
 
   scene.add(
@@ -120,29 +147,79 @@ function init() {
   const dirLight =
     new THREE.DirectionalLight(
       0xfff1d4,
-      1.4
+      3.0
     );
 
   dirLight.position.set(
+    1.6,
     6,
-    8,
-    4
+    14
+  );
+
+  dirLight.target.position.set(
+    0.8,
+    1.5,
+    2.2
   );
 
   dirLight.castShadow = true;
 
   dirLight.shadow.mapSize.set(
-    1024,
-    1024
+    2048,
+    2048
   );
 
-  dirLight.shadow.camera.left = -8;
-  dirLight.shadow.camera.right = 8;
-  dirLight.shadow.camera.top = 8;
-  dirLight.shadow.camera.bottom = -8;
+  dirLight.shadow.camera.left = -9;
+  dirLight.shadow.camera.right = 9;
+  dirLight.shadow.camera.top = 9;
+  dirLight.shadow.camera.bottom = -9;
+  dirLight.shadow.camera.near = 1;
+  dirLight.shadow.camera.far = 40;
+  dirLight.shadow.bias = -0.0004;
+  dirLight.shadow.normalBias = 0.03;
+  dirLight.shadow.radius = 3;
 
   scene.add(
-    dirLight
+    dirLight,
+    dirLight.target
+  );
+
+
+  const windowLight =
+    new THREE.PointLight(
+      0xfff0d8,
+      10,
+      0,
+      2
+    );
+
+  windowLight.position.set(
+    0,
+    3.4,
+    4.4
+  );
+
+  scene.add(
+    windowLight
+  );
+
+
+  const lampLight =
+    new THREE.PointLight(
+      0xffc98a,
+      0,
+      0,
+      2
+    );
+
+  lampLight.position.set(
+    0,
+    5.3,
+    0.5
+  );
+
+  scene.add(
+    lampLight
   );
 
 
@@ -152,7 +229,15 @@ function init() {
 
   const roomWidth = 14;
   const roomDepth = 12;
-  const roomHeight = 8;
+  const roomHeight = 6.5;
+
+  // The front wall (with the window) sits 0.12 inside the nominal depth, so the
+  // floor, ceiling and side walls must stop there instead of poking through it.
+  const frontWallInset = 0.12;
+  const interiorDepth =
+    roomDepth - frontWallInset;
+  const interiorCenterZ =
+    -frontWallInset / 2;
 
 
   // ============================================================
@@ -164,18 +249,23 @@ function init() {
 
       new THREE.PlaneGeometry(
         roomWidth,
-        roomDepth
+        interiorDepth
       ),
 
       new THREE.MeshStandardMaterial({
         map: createFloorTexture(),
         color: 0xd8c7a6,
-        side: THREE.DoubleSide
+        roughness: 0.6,
+        metalness: 0,
+        side: THREE.FrontSide
       })
     );
 
   floor.rotation.x =
     -Math.PI / 2;
+
+  floor.position.z =
+    interiorCenterZ;
 
   floor.receiveShadow = true;
 
@@ -210,29 +300,33 @@ function init() {
 
       new THREE.PlaneGeometry(
         roomWidth,
-        roomDepth
+        interiorDepth
       ),
 
       new THREE.MeshStandardMaterial({
 
-        color: 0xe5e0d6,
+        map: createCeilingTexture(),
+
+        color: 0xf0ece4,
 
         roughness: 0.95,
 
-        side: THREE.DoubleSide
+        side: THREE.FrontSide
       })
     );
 
   ceiling.position.set(
     0,
     roomHeight,
-    0
+    interiorCenterZ
   );
 
   ceiling.rotation.x =
     Math.PI / 2;
 
   ceiling.receiveShadow = true;
+
+  ceiling.castShadow = true;
 
   scene.add(
     ceiling
@@ -247,7 +341,7 @@ function init() {
     new THREE.Mesh(
 
       new THREE.PlaneGeometry(
-        roomDepth,
+        interiorDepth,
         roomHeight
       ),
 
@@ -257,13 +351,15 @@ function init() {
   leftWall.position.set(
     -roomWidth / 2,
     roomHeight / 2,
-    0
+    interiorCenterZ
   );
 
   leftWall.rotation.y =
     Math.PI / 2;
 
   leftWall.receiveShadow = true;
+
+  leftWall.castShadow = true;
 
   scene.add(
     leftWall
@@ -278,7 +374,7 @@ function init() {
     new THREE.Mesh(
 
       new THREE.PlaneGeometry(
-        roomDepth,
+        interiorDepth,
         roomHeight
       ),
 
@@ -288,13 +384,15 @@ function init() {
   rightWall.position.set(
     roomWidth / 2,
     roomHeight / 2,
-    0
+    interiorCenterZ
   );
 
   rightWall.rotation.y =
     -Math.PI / 2;
 
   rightWall.receiveShadow = true;
+
+  rightWall.castShadow = true;
 
   scene.add(
     rightWall
@@ -323,6 +421,8 @@ function init() {
   );
 
   backWall.receiveShadow = true;
+
+  backWall.castShadow = true;
 
   scene.add(
     backWall
@@ -405,6 +505,8 @@ function init() {
 
   frontLeftWall.receiveShadow = true;
 
+  frontLeftWall.castShadow = true;
+
   scene.add(
     frontLeftWall
   );
@@ -433,6 +535,8 @@ function init() {
   );
 
   frontRightWall.receiveShadow = true;
+
+  frontRightWall.castShadow = true;
 
   scene.add(
     frontRightWall
@@ -464,6 +568,8 @@ function init() {
   );
 
   frontBottomWall.receiveShadow = true;
+
+  frontBottomWall.castShadow = true;
 
   scene.add(
     frontBottomWall
@@ -498,8 +604,300 @@ function init() {
 
   frontTopWall.receiveShadow = true;
 
+  frontTopWall.castShadow = true;
+
   scene.add(
     frontTopWall
+  );
+
+
+  // ============================================================
+  // TRIM + SILL (wall/floor and wall/ceiling contact, window depth)
+  // ============================================================
+
+  const trimMaterial =
+    new THREE.MeshStandardMaterial({
+      map: createWallTexture(),
+      color: 0xf1ece0,
+      roughness: 0.55
+    });
+
+  const trimDepth = 0.06;
+  const baseboardHeight = 0.28;
+  const crownHeight = 0.2;
+  const backZ = -roomDepth / 2;
+
+  // [width, height, depth, x, y, z]
+  const trimPieces = [];
+
+  [baseboardHeight, crownHeight].forEach(
+    (h, i) => {
+
+      const y =
+        i === 0
+          ? h / 2
+          : roomHeight - h / 2;
+
+      trimPieces.push(
+        // back wall
+        [roomWidth, h, trimDepth, 0, y, backZ + trimDepth / 2],
+        // left / right walls
+        [trimDepth, h, interiorDepth, -roomWidth / 2 + trimDepth / 2, y, interiorCenterZ],
+        [trimDepth, h, interiorDepth, roomWidth / 2 - trimDepth / 2, y, interiorCenterZ],
+        // front wall, either side of the window opening
+        [frontSideWidth, h, trimDepth, -(roomWidth / 4 + frameW / 4), y, frontZ - trimDepth / 2],
+        [frontSideWidth, h, trimDepth, roomWidth / 4 + frameW / 4, y, frontZ - trimDepth / 2]
+      );
+    }
+  );
+
+  // the crown molding above the window is a single run
+  trimPieces.push(
+    [frameW, crownHeight, trimDepth, 0, roomHeight - crownHeight / 2, frontZ - trimDepth / 2],
+    [frameW, baseboardHeight, trimDepth, 0, baseboardHeight / 2, frontZ - trimDepth / 2],
+    // window sill projecting into the room
+    [frameW + 0.3, 0.07, 0.3, windowCenterX, windowBottom - 0.035, frontZ - 0.14]
+  );
+
+  trimPieces.forEach(
+    ([w, h, d, x, y, z]) => {
+
+      const piece =
+        new THREE.Mesh(
+          new THREE.BoxGeometry(w, h, d),
+          trimMaterial
+        );
+
+      piece.position.set(x, y, z);
+
+      piece.receiveShadow = true;
+
+      scene.add(piece);
+    }
+  );
+
+
+  // ============================================================
+  // FOUNDATION + OUTDOOR GROUND
+  //
+  // Layers, top to bottom:
+  //   indoor wooden floor   y = 0
+  //   concrete slab         y = -0.455 .. -0.005 (under floor and walls)
+  //   grass                 y = -0.3   (slab stands 0.28 above it)
+  //
+  // The grass is a different material and sits below the floor,
+  // so it can never read as an extension of the wooden floor.
+  // ============================================================
+
+  const foundationThickness = 0.45;
+  const foundationOverhang = 0.25;
+
+  const foundationBackZ =
+    -roomDepth / 2 - foundationOverhang;
+
+  const foundationFrontZ =
+    frontZ + foundationOverhang;
+
+  const foundation =
+    new THREE.Mesh(
+
+      new THREE.BoxGeometry(
+        roomWidth + foundationOverhang * 2,
+        foundationThickness,
+        foundationFrontZ - foundationBackZ
+      ),
+
+      new THREE.MeshStandardMaterial({
+        map: createConcreteTexture(),
+        roughness: 0.95,
+        metalness: 0
+      })
+    );
+
+  foundation.position.set(
+    0,
+    -0.005 - foundationThickness / 2,
+    (foundationBackZ + foundationFrontZ) / 2
+  );
+
+  foundation.receiveShadow = true;
+
+  foundation.castShadow = true;
+
+  scene.add(
+    foundation
+  );
+
+
+  const outdoorGround =
+    new THREE.Mesh(
+
+      new THREE.PlaneGeometry(
+        80,
+        80
+      ),
+
+      new THREE.MeshStandardMaterial({
+        map: createGrassTexture(),
+        roughness: 1,
+        metalness: 0,
+        side: THREE.FrontSide
+      })
+    );
+
+  outdoorGround.rotation.x =
+    -Math.PI / 2;
+
+  outdoorGround.position.y =
+    -0.3;
+
+  outdoorGround.receiveShadow = true;
+
+  scene.add(
+    outdoorGround
+  );
+
+
+  // ============================================================
+  // CONTACT / CORNER SHADOWS
+  //
+  // Soft ambient-occlusion strips where the walls meet the floor
+  // and the ceiling. They are simple textured decals a hair off
+  // the surface (polygonOffset prevents z-fighting).
+  // ============================================================
+
+  const edgeShadowMaterial =
+    new THREE.MeshBasicMaterial({
+
+      map: createEdgeShadowTexture(),
+
+      transparent: true,
+
+      depthWrite: false,
+
+      polygonOffset: true,
+
+      polygonOffsetFactor: -2,
+
+      polygonOffsetUnits: -2
+    });
+
+  // dark ring on the grass where the slab meets the ground:
+  // [edge x, edge z, yaw (local -Z points at the slab), strip length]
+  const foundationDepth =
+    foundationFrontZ - foundationBackZ;
+
+  const foundationEdges = [
+    [0, foundationBackZ, Math.PI, roomWidth + foundationOverhang * 2],
+    [0, foundationFrontZ, 0, roomWidth + foundationOverhang * 2],
+    [-roomWidth / 2 - foundationOverhang, (foundationBackZ + foundationFrontZ) / 2, -Math.PI / 2, foundationDepth],
+    [roomWidth / 2 + foundationOverhang, (foundationBackZ + foundationFrontZ) / 2, Math.PI / 2, foundationDepth]
+  ];
+
+  foundationEdges.forEach(
+    ([x, z, yaw, length]) => {
+
+      const strip =
+        new THREE.Mesh(
+          new THREE.PlaneGeometry(
+            length,
+            0.8
+          ),
+          edgeShadowMaterial
+        );
+
+      strip.rotation.x =
+        -Math.PI / 2;
+
+      strip.position.z =
+        0.4;
+
+      strip.renderOrder = 1;
+
+      const holder =
+        new THREE.Group();
+
+      holder.position.set(
+        x,
+        -0.296,
+        z
+      );
+
+      holder.rotation.y =
+        yaw;
+
+      holder.add(
+        strip
+      );
+
+      scene.add(
+        holder
+      );
+    }
+  );
+
+
+  // [wall foot x, wall foot z, group yaw, strip length]
+  const wallFeet = [
+    [0, -roomDepth / 2, 0, roomWidth],
+    [0, frontZ, Math.PI, roomWidth],
+    [-roomWidth / 2, interiorCenterZ, Math.PI / 2, interiorDepth],
+    [roomWidth / 2, interiorCenterZ, -Math.PI / 2, interiorDepth]
+  ];
+
+  wallFeet.forEach(
+    ([x, z, yaw, length]) => {
+
+      [false, true].forEach(
+        (isCeiling) => {
+
+          const strip =
+            new THREE.Mesh(
+              new THREE.PlaneGeometry(
+                length,
+                0.8
+              ),
+              edgeShadowMaterial
+            );
+
+          strip.rotation.x =
+            isCeiling
+              ? Math.PI / 2
+              : -Math.PI / 2;
+
+          strip.position.z =
+            isCeiling
+              ? -0.4
+              : 0.4;
+
+          strip.renderOrder = 1;
+
+          const holder =
+            new THREE.Group();
+
+          holder.position.set(
+            x,
+            isCeiling
+              ? roomHeight - 0.004
+              : 0.004,
+            z
+          );
+
+          holder.rotation.y =
+            isCeiling
+              ? yaw + Math.PI
+              : yaw;
+
+          holder.add(
+            strip
+          );
+
+          scene.add(
+            holder
+          );
+        }
+      );
+    }
   );
 
 
@@ -528,9 +926,11 @@ function init() {
   const frameMat =
     new THREE.MeshStandardMaterial({
 
-      color: 0x5c3b2a,
+      map: createFrameTexture(),
 
-      roughness: 0.7,
+      color: 0xffffff,
+
+      roughness: 0.6,
 
       metalness: 0.05
     });
@@ -634,29 +1034,44 @@ function init() {
   // Therefore it cannot become an inverted scenery plane.
   // ============================================================
 
-  const glassTexture =
-    createGlassTexture(
-      false,
-      0
-    );
+  // Hand-written GLSL glass (see shaders.js): fresnel reflection,
+  // sweeping sheen and a smudge texture. Uniforms are driven by
+  // the day/night system and the animation clock.
+  const glassUniforms = {
+
+    uSmudge: {
+      value:
+        createGlassSurfaceTexture()
+    },
+
+    uTint: {
+      value:
+        new THREE.Color(
+          0xbdd9f4
+        )
+    },
+
+    uOpacity: { value: 0.1 },
+
+    uTime: { value: 0 },
+
+    uNight: { value: 0 }
+  };
 
 
   const glassMaterial =
-    new THREE.MeshPhysicalMaterial({
+    new THREE.ShaderMaterial({
 
-      map: glassTexture,
+      uniforms:
+        glassUniforms,
+
+      vertexShader:
+        glassVertexShader,
+
+      fragmentShader:
+        glassFragmentShader,
 
       transparent: true,
-
-      opacity: 0.12,
-
-      roughness: 0.05,
-
-      metalness: 0,
-
-      transmission: 0.15,
-
-      thickness: 0.02,
 
       side: THREE.DoubleSide,
 
@@ -703,7 +1118,7 @@ function init() {
   sceneryGroup.position.set(
     windowCenterX,
     windowCenterY,
-    frontZ + 0.35
+    frontZ + 0.15
   );
 
   scene.add(
@@ -735,10 +1150,8 @@ function init() {
     new THREE.Mesh(
 
       new THREE.PlaneGeometry(
-        frameW -
-        frameThickness * 2,
-        frameH -
-        frameThickness * 2
+        5.2,
+        5.2
       ),
 
       sceneryMaterial
@@ -798,6 +1211,9 @@ function init() {
 
   // ============================================================
   // WINDOW TEXTURE UPDATE
+  //
+  // Redraws the existing scenery canvas in place (no new textures).
+  // `night` is a 0..1 blend so the sky cross-fades.
   // ============================================================
 
   function updateWindowTexture(
@@ -805,43 +1221,11 @@ function init() {
     time = 0
   ) {
 
-    const nextTexture =
-      createGlassTexture(
-        night,
-        time
-      );
-
-
-    // Glass reflection/tint
-    if (glassMaterial.map) {
-
-      glassMaterial.map.dispose();
-    }
-
-    glassMaterial.map =
-      nextTexture;
-
-    glassMaterial.needsUpdate =
-      true;
-
-
-    // Scenery
-    const sceneryTexture =
-      createGlassTexture(
-        night,
-        time
-      );
-
-    if (sceneryMaterial.map) {
-
-      sceneryMaterial.map.dispose();
-    }
-
-    sceneryMaterial.map =
-      sceneryTexture;
-
-    sceneryMaterial.needsUpdate =
-      true;
+    createGlassTexture(
+      night,
+      time,
+      sceneryTexture
+    );
   }
 
 
@@ -867,6 +1251,23 @@ function init() {
   // FLOWERPOT
   // ============================================================
 
+  const potTexture =
+    createPotTexture();
+
+  const potMaterial =
+    new THREE.MeshStandardMaterial({
+
+      map: potTexture,
+
+      bumpMap: potTexture,
+
+      bumpScale: 1.2,
+
+      roughness: 0.88,
+
+      metalness: 0
+    });
+
   const pot =
     new THREE.Mesh(
 
@@ -874,18 +1275,10 @@ function init() {
         0.6,
         0.5,
         0.9,
-        24
+        40
       ),
 
-      new THREE.MeshStandardMaterial({
-
-        map:
-          createPotTexture(),
-
-        roughness: 0.9,
-
-        metalness: 0.1
-      })
+      potMaterial
     );
 
   pot.position.y =
@@ -900,32 +1293,157 @@ function init() {
   );
 
 
+  // thick rolled rim of the pot
+  const potRim =
+    new THREE.Mesh(
+
+      new THREE.CylinderGeometry(
+        0.67,
+        0.62,
+        0.16,
+        40
+      ),
+
+      potMaterial
+    );
+
+  potRim.position.y =
+    0.82;
+
+  potRim.castShadow = true;
+
+  potRim.receiveShadow = true;
+
+  plantGroup.add(
+    potRim
+  );
+
+
+  // soft contact shadow so the pot visibly rests on the floor
+  const potContactShadow =
+    new THREE.Mesh(
+
+      new THREE.PlaneGeometry(
+        2,
+        2
+      ),
+
+      new THREE.MeshBasicMaterial({
+
+        map: createContactShadowTexture(),
+
+        transparent: true,
+
+        depthWrite: false,
+
+        polygonOffset: true,
+
+        polygonOffsetFactor: -2,
+
+        polygonOffsetUnits: -2
+      })
+    );
+
+  potContactShadow.rotation.x =
+    -Math.PI / 2;
+
+  potContactShadow.position.y =
+    0.004;
+
+  potContactShadow.renderOrder =
+    1;
+
+  plantGroup.add(
+    potContactShadow
+  );
+
+
   // ============================================================
   // SOIL
+  //
+  // A lumpy mound (displaced hemisphere) rising above the rim,
+  // so the stem visibly grows out of the earth.
   // ============================================================
+
+  const soilGeometry =
+    new THREE.SphereGeometry(
+      1,
+      40,
+      14,
+      0,
+      Math.PI * 2,
+      0,
+      Math.PI / 2
+    );
+
+  {
+    const position =
+      soilGeometry.attributes.position;
+
+    for (
+      let i = 0;
+      i < position.count;
+      i++
+    ) {
+
+      const x = position.getX(i);
+      const y = position.getY(i);
+      const z = position.getZ(i);
+
+      const lump =
+        (
+          Math.sin(x * 9 + z * 5) +
+          Math.cos(z * 11 - x * 4)
+        ) * 0.025 * y;
+
+      position.setY(
+        i,
+        y + lump
+      );
+    }
+
+    soilGeometry.computeVertexNormals();
+  }
+
+  const soilTexture =
+    createSoilTexture();
+
+  soilTexture.repeat.set(
+    2,
+    2
+  );
 
   const soil =
     new THREE.Mesh(
 
-      new THREE.CylinderGeometry(
-        0.52,
-        0.46,
-        0.14,
-        20
-      ),
+      soilGeometry,
 
       new THREE.MeshStandardMaterial({
 
-        color: 0x3f2d1f,
+        map: soilTexture,
 
-        roughness: 1
+        bumpMap: soilTexture,
+
+        bumpScale: 2,
+
+        roughness: 1,
+
+        metalness: 0
       })
     );
 
+  soil.scale.set(
+    0.6,
+    0.11,
+    0.6
+  );
+
   soil.position.y =
-    0.92;
+    0.88;
 
   soil.castShadow = true;
+
+  soil.receiveShadow = true;
 
   plantGroup.add(
     soil
@@ -976,10 +1494,116 @@ function init() {
 
 
   // ============================================================
+  // PENDANT LAMP (visual fixture for the lamp PointLight)
+  // ============================================================
+
+  const lampBulbMaterial =
+    new THREE.MeshStandardMaterial({
+
+      color: 0xfff1d0,
+
+      emissive: 0xffc98a,
+
+      emissiveIntensity: 0,
+
+      roughness: 0.4
+    });
+
+  const lampGroup =
+    new THREE.Group();
+
+  lampGroup.position.set(
+    lampLight.position.x,
+    lampLight.position.y,
+    lampLight.position.z
+  );
+
+  const lampCord =
+    new THREE.Mesh(
+
+      new THREE.CylinderGeometry(
+        0.015,
+        0.015,
+        roomHeight - lampLight.position.y,
+        6
+      ),
+
+      new THREE.MeshStandardMaterial({
+        color: 0x222222,
+        roughness: 0.6
+      })
+    );
+
+  lampCord.position.y =
+    (roomHeight - lampLight.position.y) / 2 + 0.05;
+
+  lampGroup.add(
+    lampCord
+  );
+
+  const lampShade =
+    new THREE.Mesh(
+
+      new THREE.ConeGeometry(
+        0.32,
+        0.28,
+        24,
+        1,
+        true
+      ),
+
+      new THREE.MeshStandardMaterial({
+        map: createWallTexture(),
+        color: 0xd9c9a8,
+        roughness: 0.8,
+        side: THREE.DoubleSide
+      })
+    );
+
+  lampShade.position.y =
+    0.16;
+
+  lampGroup.add(
+    lampShade
+  );
+
+  const lampBulb =
+    new THREE.Mesh(
+
+      new THREE.SphereGeometry(
+        0.1,
+        16,
+        12
+      ),
+
+      lampBulbMaterial
+    );
+
+  lampGroup.add(
+    lampBulb
+  );
+
+  scene.add(
+    lampGroup
+  );
+
+
+  // ============================================================
   // DAY / NIGHT
+  //
+  // setMode() only chooses the target. Every frame nightMix eases
+  // toward it (delta-time based) and applyEnvironment() blends
+  // lights, sky, glass and scenery, so the change is a smooth
+  // transition rather than a hard cut.
   // ============================================================
 
   let isNight = false;
+
+  let nightMix = 0;
+
+  let lampOn = false;
+
+  let lampLevel = 0;
 
 
   const modeLabel =
@@ -987,11 +1611,151 @@ function init() {
       'mode'
     );
 
-
   const colorLabel =
     document.getElementById(
       'colorLabel'
     );
+
+  const lampLabel =
+    document.getElementById(
+      'lampLabel'
+    );
+
+
+  const dayLook = {
+
+    ambient: 0.9,
+    ambientColor: new THREE.Color(0xffffff),
+    groundColor: new THREE.Color(0xd0bfa6),
+    sun: 3.0,
+    sunColor: new THREE.Color(0xfff2d6),
+    sunPosition: new THREE.Vector3(1.6, 6, 14),
+    skyLight: 10,
+    background: new THREE.Color(0xbfd3d9),
+    glassTint: new THREE.Color(0xbdd9f4),
+    glassOpacity: 0.1,
+    outdoorGround: new THREE.Color(0xffffff)
+  };
+
+  const nightLook = {
+
+    ambient: 0.2,
+    ambientColor: new THREE.Color(0x334466),
+    groundColor: new THREE.Color(0x120e0a),
+    sun: 0.8,
+    sunColor: new THREE.Color(0x8aa4d6),
+    sunPosition: new THREE.Vector3(-2.5, 7, 14),
+    skyLight: 0,
+    background: new THREE.Color(0x09121b),
+    glassTint: new THREE.Color(0x203553),
+    glassOpacity: 0.22,
+    outdoorGround: new THREE.Color(0x27303a)
+  };
+
+
+  function applyEnvironment() {
+
+    // smoothstep so the transition eases in and out
+    const m =
+      nightMix * nightMix *
+      (3 - 2 * nightMix);
+
+    const mixNumber =
+      THREE.MathUtils.lerp;
+
+
+    ambientLight.intensity =
+      mixNumber(dayLook.ambient, nightLook.ambient, m);
+
+    ambientLight.color
+      .copy(dayLook.ambientColor)
+      .lerp(nightLook.ambientColor, m);
+
+    ambientLight.groundColor
+      .copy(dayLook.groundColor)
+      .lerp(nightLook.groundColor, m);
+
+
+    dirLight.intensity =
+      mixNumber(dayLook.sun, nightLook.sun, m);
+
+    dirLight.color
+      .copy(dayLook.sunColor)
+      .lerp(nightLook.sunColor, m);
+
+    dirLight.position
+      .lerpVectors(
+        dayLook.sunPosition,
+        nightLook.sunPosition,
+        m
+      );
+
+
+    windowLight.intensity =
+      mixNumber(dayLook.skyLight, nightLook.skyLight, m);
+
+
+    scene.background
+      .copy(dayLook.background)
+      .lerp(nightLook.background, m);
+
+    outdoorGround.material.color
+      .copy(dayLook.outdoorGround)
+      .lerp(nightLook.outdoorGround, m);
+
+
+    glassUniforms.uTint.value
+      .copy(dayLook.glassTint)
+      .lerp(nightLook.glassTint, m);
+
+    glassUniforms.uOpacity.value =
+      mixNumber(dayLook.glassOpacity, nightLook.glassOpacity, m);
+
+    glassUniforms.uNight.value =
+      m;
+
+
+    lampLight.intensity =
+      lampLevel * 32;
+
+    lampBulbMaterial.emissiveIntensity =
+      lampLevel * 2;
+
+
+    sunflower.setDaylight(
+      1 - m
+    );
+  }
+
+
+  function updateLabels() {
+
+    if (modeLabel) {
+
+      modeLabel.textContent =
+        isNight
+          ? 'NIGHT'
+          : 'DAY';
+
+      modeLabel.className =
+        isNight
+          ? 'night'
+          : 'day';
+    }
+
+    if (lampLabel) {
+
+      lampLabel.textContent =
+        lampOn
+          ? 'LAMP ON'
+          : 'LAMP OFF';
+
+      lampLabel.className =
+        lampOn
+          ? 'on'
+          : 'off';
+    }
+  }
 
 
   function setMode(
@@ -1001,150 +1765,21 @@ function init() {
     isNight =
       night;
 
+    // the pendant lamp follows the mode by default (L overrides it)
+    lampOn =
+      night;
 
-    if (isNight) {
-
-      ambientLight.intensity =
-        0.25;
-
-      ambientLight.color.set(
-        0x334466
-      );
-
-
-      dirLight.intensity =
-        0.4;
-
-      dirLight.color.set(
-        0x8aa4d6
-      );
-
-
-      dirLight.position.set(
-        -5,
-        4,
-        -3
-      );
-
-
-      scene.background =
-        new THREE.Color(
-          0x09121b
-        );
-
-
-      glassMaterial.color.set(
-        0x203553
-      );
-
-
-      glassMaterial.opacity =
-        0.25;
-
-
-      updateWindowTexture(
-        true
-      );
-
-
-      if (modeLabel) {
-
-        modeLabel.textContent =
-          'NIGHT';
-
-        modeLabel.className =
-          'night';
-      }
-
-    } else {
-
-      ambientLight.intensity =
-        0.7;
-
-      ambientLight.color.set(
-        0xffffff
-      );
-
-
-      dirLight.intensity =
-        1.4;
-
-      dirLight.color.set(
-        0xfff2d6
-      );
-
-
-      dirLight.position.set(
-        6,
-        8,
-        4
-      );
-
-
-      scene.background =
-        new THREE.Color(
-          0xbfd3d9
-        );
-
-
-      glassMaterial.color.set(
-        0xbdd9f4
-      );
-
-
-      glassMaterial.opacity =
-        0.12;
-
-
-      updateWindowTexture(
-        false
-      );
-
-
-      if (modeLabel) {
-
-        modeLabel.textContent =
-          'DAY';
-
-        modeLabel.className =
-          'day';
-      }
-    }
+    updateLabels();
   }
 
 
-  // ============================================================
-  // KEYBOARD
-  // ============================================================
+  function toggleLamp() {
 
-  window.addEventListener(
-    'keydown',
-    (event) => {
+    lampOn =
+      !lampOn;
 
-      if (
-        event.key === 'd' ||
-        event.key === 'D'
-      ) {
-
-        setMode(false);
-
-      } else if (
-        event.key === 'n' ||
-        event.key === 'N'
-      ) {
-
-        setMode(true);
-
-      } else if (
-        event.code === 'Space'
-      ) {
-
-        setMode(
-          !isNight
-        );
-      }
-    }
-  );
+    updateLabels();
+  }
 
 
   // ============================================================
@@ -1162,15 +1797,76 @@ function init() {
   const clickableMeshes = [
 
     pot,
+    potRim,
     soil,
 
     ...sunflower.clickTargets
   ];
 
 
+  function cycleLeafColor() {
+
+    colorIndex =
+      (
+        colorIndex + 1
+      ) %
+      leafColors.length;
+
+
+    sunflower.setLeafTint(
+      leafColors[
+        colorIndex
+      ]
+    );
+
+
+    if (colorLabel) {
+
+      colorLabel.textContent =
+        colorNames[
+          colorIndex
+        ];
+
+
+      colorLabel.style.background =
+        '#' +
+        leafColors[
+          colorIndex
+        ].getHexString();
+    }
+  }
+
+
+  let pointerDownAt = null;
+
+
+  window.addEventListener(
+    'pointerdown',
+    (event) => {
+
+      pointerDownAt = {
+        x: event.clientX,
+        y: event.clientY
+      };
+    }
+  );
+
+
   window.addEventListener(
     'click',
     (event) => {
+
+      // a drag (orbiting the view) is not a click on the plant
+      if (
+        pointerDownAt &&
+        Math.hypot(
+          event.clientX - pointerDownAt.x,
+          event.clientY - pointerDownAt.y
+        ) > 5
+      ) {
+        return;
+      }
+
 
       pointer.x =
         (
@@ -1206,34 +1902,7 @@ function init() {
         hits.length > 0
       ) {
 
-        colorIndex =
-          (
-            colorIndex + 1
-          ) %
-          leafColors.length;
-
-
-        sunflower.setLeafTint(
-          leafColors[
-            colorIndex
-          ]
-        );
-
-
-        if (colorLabel) {
-
-          colorLabel.textContent =
-            colorNames[
-              colorIndex
-            ];
-
-
-          colorLabel.style.background =
-            '#' +
-            leafColors[
-              colorIndex
-            ].getHexString();
-        }
+        cycleLeafColor();
       }
     }
   );
@@ -1259,18 +1928,254 @@ function init() {
 
 
   controls.minDistance =
-    3;
+    1.5;
 
 
   controls.maxDistance =
-    12;
+    9;
 
 
-  controls.target.set(
-    0.8,
-    1.2,
-    2.2
+  // never look from under the floor or straight up through the ceiling
+  controls.minPolarAngle =
+    0.35;
+
+
+  controls.maxPolarAngle =
+    Math.PI * 0.58;
+
+
+  controls.target.copy(
+    initialCameraTarget
   );
+
+  controls.update();
+
+
+  // keep the camera inside the enclosed room so the outside is never exposed
+  const cameraLimits = {
+    minX: -roomWidth / 2 + 0.6,
+    maxX: roomWidth / 2 - 0.6,
+    minY: 0.6,
+    maxY: roomHeight - 0.6,
+    minZ: -roomDepth / 2 + 0.6,
+    maxZ: frontZ - 0.6
+  };
+
+
+  function clampToRoom(
+    vector
+  ) {
+
+    vector.set(
+      THREE.MathUtils.clamp(vector.x, cameraLimits.minX, cameraLimits.maxX),
+      THREE.MathUtils.clamp(vector.y, cameraLimits.minY, cameraLimits.maxY),
+      THREE.MathUtils.clamp(vector.z, cameraLimits.minZ, cameraLimits.maxZ)
+    );
+  }
+
+
+  function resetCamera() {
+
+    camera.position.copy(
+      initialCameraPosition
+    );
+
+    controls.target.copy(
+      initialCameraTarget
+    );
+
+    controls.update();
+  }
+
+
+  // ============================================================
+  // KEYBOARD
+  //
+  // N / Space  toggle day and night
+  // L          toggle the pendant lamp
+  // C          cycle the leaf color (same as clicking the plant)
+  // R          reset the camera
+  // W A S D / arrows   walk around the room
+  // Q / E      lower / raise the view
+  // ============================================================
+
+  const movementKeys = {
+
+    w: 'forward',
+    arrowup: 'forward',
+    s: 'back',
+    arrowdown: 'back',
+    a: 'left',
+    arrowleft: 'left',
+    d: 'right',
+    arrowright: 'right',
+    q: 'down',
+    e: 'up'
+  };
+
+  const activeMovement =
+    new Set();
+
+
+  window.addEventListener(
+    'keydown',
+    (event) => {
+
+      const key =
+        event.key.toLowerCase();
+
+
+      if (
+        movementKeys[key]
+      ) {
+
+        activeMovement.add(
+          movementKeys[key]
+        );
+
+        event.preventDefault();
+
+        return;
+      }
+
+
+      if (
+        event.repeat
+      ) {
+        return;
+      }
+
+
+      if (
+        key === 'n' ||
+        event.code === 'Space'
+      ) {
+
+        setMode(
+          !isNight
+        );
+
+        event.preventDefault();
+
+      } else if (
+        key === 'l'
+      ) {
+
+        toggleLamp();
+
+      } else if (
+        key === 'c'
+      ) {
+
+        cycleLeafColor();
+
+      } else if (
+        key === 'r'
+      ) {
+
+        resetCamera();
+      }
+    }
+  );
+
+
+  window.addEventListener(
+    'keyup',
+    (event) => {
+
+      const action =
+        movementKeys[
+          event.key.toLowerCase()
+        ];
+
+      if (action) {
+
+        activeMovement.delete(
+          action
+        );
+      }
+    }
+  );
+
+
+  window.addEventListener(
+    'blur',
+    () => {
+
+      activeMovement.clear();
+    }
+  );
+
+
+  const moveForward =
+    new THREE.Vector3();
+
+  const moveRight =
+    new THREE.Vector3();
+
+  const moveDelta =
+    new THREE.Vector3();
+
+  const worldUp =
+    new THREE.Vector3(0, 1, 0);
+
+
+  function updateMovement(
+    dt
+  ) {
+
+    if (
+      activeMovement.size === 0
+    ) {
+      return;
+    }
+
+
+    camera.getWorldDirection(
+      moveForward
+    );
+
+    moveForward.y = 0;
+
+    moveForward.normalize();
+
+    moveRight.crossVectors(
+      moveForward,
+      worldUp
+    );
+
+
+    moveDelta.set(0, 0, 0);
+
+    if (activeMovement.has('forward')) moveDelta.add(moveForward);
+    if (activeMovement.has('back')) moveDelta.sub(moveForward);
+    if (activeMovement.has('right')) moveDelta.add(moveRight);
+    if (activeMovement.has('left')) moveDelta.sub(moveRight);
+
+    if (moveDelta.lengthSq() > 0) {
+
+      moveDelta
+        .normalize()
+        .multiplyScalar(3.5 * dt);
+    }
+
+    if (activeMovement.has('up')) moveDelta.y += 2 * dt;
+    if (activeMovement.has('down')) moveDelta.y -= 2 * dt;
+
+
+    // move the camera and its orbit target together (walking, not orbiting)
+    camera.position.add(
+      moveDelta
+    );
+
+    controls.target.add(
+      moveDelta
+    );
+
+    clampToRoom(
+      controls.target
+    );
+  }
 
 
   // ============================================================
@@ -1304,6 +2209,26 @@ function init() {
   const clock =
     new THREE.Clock();
 
+  let elapsed = 0;
+
+  let sceneryTimer = 0;
+
+
+  function approach(
+    value,
+    target,
+    step
+  ) {
+
+    if (
+      Math.abs(target - value) <= step
+    ) {
+      return target;
+    }
+
+    return value + Math.sign(target - value) * step;
+  }
+
 
   function animate() {
 
@@ -1312,17 +2237,54 @@ function init() {
     );
 
 
-    const t =
-      clock.getElapsedTime();
+    // clamp delta so a background tab does not cause a huge jump
+    const dt =
+      Math.min(
+        clock.getDelta(),
+        0.1
+      );
+
+    elapsed += dt;
 
 
     // ----------------------------------------------------------
-    // SUNFLOWER SWAY
+    // DAY / NIGHT TRANSITION + LAMP
+    // ----------------------------------------------------------
+
+    const nextNight =
+      approach(nightMix, isNight ? 1 : 0, dt / 1.8);
+
+    const nextLamp =
+      approach(lampLevel, lampOn ? 1 : 0, dt / 0.5);
+
+    if (
+      nextNight !== nightMix ||
+      nextLamp !== lampLevel
+    ) {
+
+      nightMix = nextNight;
+
+      lampLevel = nextLamp;
+
+      applyEnvironment();
+    }
+
+
+    // ----------------------------------------------------------
+    // SUNFLOWER SWAY (+ leaf shader time)
     // ----------------------------------------------------------
 
     sunflower.update(
-      t
+      elapsed
     );
+
+
+    // ----------------------------------------------------------
+    // GLASS SHADER
+    // ----------------------------------------------------------
+
+    glassUniforms.uTime.value =
+      elapsed;
 
 
     // ----------------------------------------------------------
@@ -1333,27 +2295,39 @@ function init() {
 
 
     // ----------------------------------------------------------
-    // WINDOW SCENERY
+    // WINDOW SCENERY (clouds, trees, stars drift)
+    //
+    // Redrawn in place ~16 times per second, not every frame.
     // ----------------------------------------------------------
 
-    /*
-      Update the scenery texture periodically.
+    sceneryTimer += dt;
 
-      The actual scenery is now a separate physical object,
-      not the glass itself.
-    */
+    if (
+      sceneryTimer > 0.06
+    ) {
 
-    updateWindowTexture(
-      isNight,
-      t
+      sceneryTimer = 0;
+
+      updateWindowTexture(
+        nightMix,
+        elapsed
+      );
+    }
+
+
+    // ----------------------------------------------------------
+    // KEYBOARD MOVEMENT + CONTROLS
+    // ----------------------------------------------------------
+
+    updateMovement(
+      dt
     );
 
-
-    // ----------------------------------------------------------
-    // CONTROLS
-    // ----------------------------------------------------------
-
     controls.update();
+
+    clampToRoom(
+      camera.position
+    );
 
 
     // ----------------------------------------------------------
@@ -1370,6 +2344,12 @@ function init() {
   // ============================================================
   // START
   // ============================================================
+
+  setMode(
+    false
+  );
+
+  applyEnvironment();
 
   animate();
 }

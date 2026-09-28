@@ -23,65 +23,13 @@ Three.js (r160), Vite (dev server / bundler), plain JavaScript ES modules, GLSL 
 
 | Requirement | Implementation |
 |---|---|
-| Custom shader | `src/shaders.js` — `ShaderMaterial` applied to every leaf in `src/main.js` |
-| Lighting | `AmbientLight` + `DirectionalLight`, `src/main.js` |
-| Perspective projection | `THREE.PerspectiveCamera`, `src/main.js` |
-| Texture per object | `src/textures.js` — floor, wall, pot, leaf, window textures, all canvas-generated |
-| Animation | leaf sine-sway + shader time uniform, `animate()` in `src/main.js` |
-| Keyboard interaction | `D` / `N` / `Space` in `src/main.js` |
-| Mouse interaction | `Raycaster` click handler in `src/main.js` |
-| Shadows | `renderer.shadowMap`, pot/stem cast, floor/walls receive |
-| Full-screen canvas | `index.html` CSS (`html, body, canvas { width/height: 100% }`) + `renderer.setSize` |
-
-## 5. Custom shader
-
-`src/shaders.js` defines the leaf `ShaderMaterial` (one instance per leaf, so each leaf can hold its own color):
-- **Vertex shader**: the standard transform every vertex shader does — `gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0)` — plus passing UV coordinates to the fragment shader.
-- **Fragment shader**: samples the leaf texture, multiplies it by a `plantColor` uniform (this is what the mouse click changes), and adds a small `sin(time * 2.0 + vUv.y * 5.0) * 0.05` brightness wave so the shader is visibly animated, not static.
-
-Applied in `src/main.js` inside the leaf-creation loop — each leaf gets `uniforms: { map, plantColor, time }`.
-
-## 6. Lighting
-
-- `AmbientLight` — soft fill light so nothing is pure black.
-- `DirectionalLight` — acts as sun/moon; Three.js points it from its `position` toward the origin, so moving the position changes the light **direction**, not just its color.
-- Day: bright white ambient, warm strong light from `(6, 8, 4)` (window/right side).
-- Night: dim blue ambient, weak cool light from `(-5, 3, -4)` (opposite side — moonlight). The shadow direction visibly flips between modes.
-
-## 7. Perspective projection
-
-`new THREE.PerspectiveCamera(45, aspect, 0.1, 100)` — objects farther from the camera appear smaller, matching human vision. Camera sits at `(6, 4, 8)` looking toward `(0.5, 1.8, 0)`, a 3/4 angle that keeps the window and the plant both in frame.
-
-## 8. Textures
-
-All generated at runtime on an HTML `<canvas>` (`src/textures.js`), applied as `.map` on each material — no external image files, so nothing can fail to load during a demo:
-- Floor: striped wood planks
-- Walls: subtle off-white noise
-- Pot: terracotta with horizontal ridge lines
-- Leaves: green ellipse with a center vein (alpha-transparent background)
-- Window glass: sky + hill + sun outdoor scene
-
-## 9. Animation
-
-Each leaf sits on a pivot `Group`. Every frame:
-```js
-pivot.rotation.z = baseRotZ + Math.sin(t * 0.6 + offset) * 0.08;
-pivot.userData.material.uniforms.time.value = t;
-```
-A slow, small-amplitude sine sway (per-leaf phase offset so they don't move in sync) plus the shader's own animated wave term.
-
-## 10. Keyboard interaction
-
-`window.addEventListener('keydown', ...)` in `src/main.js`:
-- `D` → day mode, `N` → night mode, `Space` → toggle. The current mode is shown live in the on-screen panel.
-
-## 11. Mouse interaction
-
-A `click` listener converts the cursor position to normalized device coordinates and casts a `THREE.Raycaster` against the pot, stem, and all leaf meshes. On a hit, `colorIndex` cycles green → purple → red → green, and every leaf's `plantColor` shader uniform is updated directly — the 3D object itself changes, not just UI text (the panel's color label is just a readout of the same state).
-
-## 12. Day/Night implementation
-
-`setMode(isNight)` in `src/main.js` is the single place that updates: ambient light intensity/color, directional light intensity/color/**position**, scene background, window glass tint/opacity, and the UI mode badge.
+| Custom shaders | `src/shaders.js` (GLSL): sunflower leaf wind-flutter + mottling + translucent fresnel rim injected into the leaf materials (`onBeforeCompile`, `src/sunflower.js`); window glass is a full hand-written `ShaderMaterial` (fresnel reflection, sweeping sheen, smudge texture) in `src/main.js` |
+| Lighting | `HemisphereLight` (sky/ground fill), shadow-casting `DirectionalLight` sun/moon aimed through the window, `PointLight` skylight at the window, warm `PointLight` pendant lamp (key `L`); soft PCF shadows; smooth day/night blend |
+| Perspective projection | `THREE.PerspectiveCamera(60, aspect, 0.1, 60)` placed inside the room at eye height |
+| Texture for each object | `src/textures.js` + `src/sunflower.js`: floor planks, wall plaster, ceiling plaster, terracotta pot, soil, window frame wood, glass smudges, outdoor scenery (sky/clouds/hills/trees/stars/moon), stem, leaf veins, petals, seeds, sepals |
+| Animation | delta-time animation loop: stem/leaf/head sway, GLSL leaf flutter, drifting clouds and stars, sweeping glass sheen, eased day/night + lamp transition |
+| Mouse interaction | OrbitControls (limited so the camera stays in the room); click the pot/soil/plant to cycle the leaf color (drags are ignored) |
+| Keyboard interaction | `N`/`Space` day-night, `L` lamp, `C` leaf color, `R` reset view, `W A S D`/arrows walk, `Q`/`E` down/up |
 
 ## 13. What was wrong before / what changed
 

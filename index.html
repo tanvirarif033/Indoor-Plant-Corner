@@ -11,7 +11,7 @@
     #panel {
       position: fixed; top: 16px; left: 16px; z-index: 10;
       background: rgba(20, 24, 22, 0.7); color: #eee;
-      padding: 12px 16px; border-radius: 10px; width: 210px;
+      padding: 12px 16px; border-radius: 10px; width: 250px;
       backdrop-filter: blur(4px); border: 1px solid rgba(255,255,255,0.1);
       pointer-events: none; /* clicks pass through to the canvas underneath */
     }
@@ -20,13 +20,15 @@
     #panel kbd {
       background: #333; padding: 1px 6px; border-radius: 4px; border: 1px solid #555;
     }
-    #mode, #colorLabel {
+    #mode, #colorLabel, #lampLabel {
       margin-top: 4px; font-weight: bold; font-size: 12px;
       padding: 3px 8px; border-radius: 6px; display: inline-block; margin-right: 4px;
     }
     #mode.day { background: #ffe08a; color: #3a2e00; }
     #mode.night { background: #2a3a6b; color: #cfe0ff; }
     #colorLabel { background: #3f8f3f; color: #fff; }
+    #lampLabel.off { background: #444; color: #bbb; }
+    #lampLabel.on { background: #ffc98a; color: #3a2400; }
     /* shown only if WebGL/module loading fails, so the page never looks silently blank */
     #fatalError {
       display: none; position: fixed; inset: 0; z-index: 20;
@@ -38,9 +40,12 @@
 <body>
   <div id="panel">
     <h1>INDOOR PLANT CORNER</h1>
-    <p><kbd>D</kbd> Day &nbsp; <kbd>N</kbd> Night &nbsp; <kbd>Space</kbd> Toggle</p>
-    <p>Click the plant to change its color.</p>
+    <p><kbd>N</kbd> / <kbd>Space</kbd> Day-Night &nbsp; <kbd>L</kbd> Lamp</p>
+    <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Walk &nbsp; <kbd>Q</kbd><kbd>E</kbd> Down/Up</p>
+    <p><kbd>R</kbd> Reset view &nbsp; <kbd>C</kbd> Leaf color</p>
+    <p>Drag to look around. Click the plant to change its color.</p>
     <span id="mode" class="day">DAY</span>
+    <span id="lampLabel" class="off">LAMP OFF</span>
     <span id="colorLabel">GREEN</span>
   </div>
   <div id="fatalError"></div>
