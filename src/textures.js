@@ -1,6 +1,15 @@
 import * as THREE from 'three';
 
-// all textures are drawn on canvas at runtime so no external image files are needed
+// Most textures are drawn on canvas at runtime so no external image files are needed.
+// The walls, ceiling and floor use real photographed surfaces instead (CC0, Poly Haven:
+// https://polyhaven.com/a/white_stucco and https://polyhaven.com/a/wooden_floor_02) so
+// they catch light like actual painted plaster and hardwood.
+import wallDiffuseUrl from './assets/textures/wall/wall_diffuse.jpg';
+import wallNormalUrl from './assets/textures/wall/wall_normal.jpg';
+import wallRoughnessUrl from './assets/textures/wall/wall_roughness.jpg';
+import floorDiffuseUrl from './assets/textures/floor/floor_diffuse.jpg';
+import floorNormalUrl from './assets/textures/floor/floor_normal.jpg';
+import floorRoughnessUrl from './assets/textures/floor/floor_roughness.jpg';
 
 function canvas(size = 256) {
   const c = document.createElement('canvas');
@@ -8,55 +17,38 @@ function canvas(size = 256) {
   return c;
 }
 
-// wooden plank floor texture: staggered boards with grain, knots and plank gaps
-export function createFloorTexture() {
-  const c = canvas(512);
-  const ctx = c.getContext('2d');
-  const plankColors = ['#9c6b3e', '#8a5a30', '#a9764a', '#946334'];
-  const plankH = 64;
-  const boardLength = 256;
-  let seed = 7;
-  const rand = () => {
-    seed = (seed * 16807) % 2147483647;
-    return seed / 2147483647;
-  };
+const textureLoader = new THREE.TextureLoader();
 
-  for (let row = 0; row < c.height / plankH; row++) {
-    const y = row * plankH;
-    const offset = (row % 2) * (boardLength / 2) + rand() * 20;
-    for (let x = -boardLength; x < c.width; x += boardLength) {
-      const bx = x + offset;
-      ctx.fillStyle = plankColors[Math.floor(rand() * plankColors.length)];
-      ctx.fillRect(bx, y, boardLength, plankH);
-      // grain
-      for (let g = 0; g < 26; g++) {
-        ctx.strokeStyle = `rgba(${rand() < 0.5 ? '60,35,15' : '190,140,90'},${0.06 + rand() * 0.1})`;
-        ctx.lineWidth = 0.6 + rand();
-        const gy = y + rand() * plankH;
-        ctx.beginPath();
-        ctx.moveTo(bx, gy);
-        ctx.bezierCurveTo(bx + boardLength * 0.3, gy + (rand() - 0.5) * 5, bx + boardLength * 0.6, gy + (rand() - 0.5) * 5, bx + boardLength, gy);
-        ctx.stroke();
-      }
-      if (rand() < 0.3) {
-        ctx.fillStyle = 'rgba(50,28,12,0.35)';
-        ctx.beginPath();
-        ctx.ellipse(bx + rand() * boardLength, y + plankH * (0.25 + rand() * 0.5), 4, 2.5, 0, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      // gaps between boards
-      ctx.fillStyle = 'rgba(20,10,4,0.55)';
-      ctx.fillRect(bx, y, 1.5, plankH);
-    }
-    ctx.fillStyle = 'rgba(20,10,4,0.55)';
-    ctx.fillRect(0, y, c.width, 1.5);
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(3, 3);
-  tex.anisotropy = 4;
-  return tex;
+// loads a photographed diffuse/normal/roughness map set and tiles it to taste
+function loadPbrMaps(diffuseUrl, normalUrl, roughnessUrl, repeatX, repeatY, anisotropy = 8) {
+  const diffuse = textureLoader.load(diffuseUrl);
+  diffuse.colorSpace = THREE.SRGBColorSpace;
+
+  const normal = textureLoader.load(normalUrl);
+  const roughness = textureLoader.load(roughnessUrl);
+
+  [diffuse, normal, roughness].forEach((tex) => {
+    tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+    tex.repeat.set(repeatX, repeatY);
+    tex.anisotropy = anisotropy;
+  });
+
+  return { map: diffuse, normalMap: normal, roughnessMap: roughness };
+}
+
+// real photographed plaster wall (walls tile more tightly than the broad ceiling plane)
+export function createWallMaps() {
+  return loadPbrMaps(wallDiffuseUrl, wallNormalUrl, wallRoughnessUrl, 3, 1.4);
+}
+
+// same physical surface, tiled to suit the wide ceiling plane
+export function createCeilingMaps() {
+  return loadPbrMaps(wallDiffuseUrl, wallNormalUrl, wallRoughnessUrl, 3, 2.4);
+}
+
+// real photographed hardwood plank floor
+export function createFloorMaps() {
+  return loadPbrMaps(floorDiffuseUrl, floorNormalUrl, floorRoughnessUrl, 4, 3.4);
 }
 
 // subtle painted wall texture
@@ -73,24 +65,6 @@ export function createWallTexture() {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(2, 2);
-  return tex;
-}
-
-// matte plaster ceiling with a very faint stipple
-export function createCeilingTexture() {
-  const c = canvas(256);
-  const ctx = c.getContext('2d');
-  ctx.fillStyle = '#f2eee6';
-  ctx.fillRect(0, 0, c.width, c.height);
-  for (let i = 0; i < 2500; i++) {
-    ctx.fillStyle = `rgba(${i % 2 ? '120,110,95' : '255,255,255'},${Math.random() * 0.05})`;
-    const r = 1 + Math.random() * 2;
-    ctx.fillRect(Math.random() * c.width, Math.random() * c.height, r, r);
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(4, 4);
   return tex;
 }
 
