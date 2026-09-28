@@ -58,22 +58,60 @@ export function createPotTexture() {
   return tex;
 }
 
-// leaf-shaped texture with transparent background and a center vein
+// grayscale leaf surface detail (mottling, central vein, secondary veins) for the 3D
+// sunflower leaf geometry. It is multiplied by the material color, so the click-to-recolor
+// tint still works. u runs across the blade (x), v along it (canvas y: base at bottom).
 export function createLeafTexture() {
-  const c = canvas(128);
+  const size = 256;
+  const c = canvas(size);
   const ctx = c.getContext('2d');
-  ctx.clearRect(0, 0, c.width, c.height);
-  ctx.fillStyle = '#3f8f3f';
+  ctx.fillStyle = '#e6e6e6';
+  ctx.fillRect(0, 0, size, size);
+
+  // soft mottling
+  for (let i = 0; i < 700; i++) {
+    const g = 200 + ((i * 97) % 55);
+    ctx.fillStyle = `rgba(${g},${g},${g},0.18)`;
+    const x = (i * 53.3) % size;
+    const y = (i * 91.7) % size;
+    ctx.fillRect(x, y, 3 + (i % 5), 3 + (i % 4));
+  }
+
+  const mid = size / 2;
+  const bladeStart = size * 0.8; // petiole occupies the lowest 20% of the length
+
+  // secondary veins branch from the midrib toward the leaf edge and curve to the tip
+  ctx.lineCap = 'round';
+  for (let side = -1; side <= 1; side += 2) {
+    for (let k = 0; k < 8; k++) {
+      const y0 = bladeStart - k * 20;
+      const reach = 105 * (1 - k * 0.05);
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(mid, y0);
+      ctx.quadraticCurveTo(mid + side * reach * 0.5, y0 - 8, mid + side * reach, y0 - 46);
+      ctx.stroke();
+      // faint darker shadow line next to the vein for a subtle relief
+      ctx.strokeStyle = 'rgba(90,90,90,0.18)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(mid, y0 + 2);
+      ctx.quadraticCurveTo(mid + side * reach * 0.5, y0 - 6, mid + side * reach, y0 - 44);
+      ctx.stroke();
+    }
+  }
+
+  // central vein
+  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+  ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.ellipse(64, 64, 50, 34, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(20,60,20,0.6)';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(14, 64);
-  ctx.lineTo(114, 64);
+  ctx.moveTo(mid, size);
+  ctx.lineTo(mid, 6);
   ctx.stroke();
+
   const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
